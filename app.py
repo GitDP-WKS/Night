@@ -25,7 +25,7 @@ SKILL_NAMES = {
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 
 def parse_duration(s: str) -> pd.Timedelta:
-    \"\"\"Парсит строки вида '9:50', ':10', ':00' в Timedelta.\"\"\"
+    """Парсит строки вида '9:50', ':10', ':00' в Timedelta."""
     if s is None:
         return pd.Timedelta(0)
     s = s.strip()
@@ -51,7 +51,7 @@ def parse_duration(s: str) -> pd.Timedelta:
 
 
 def combine_datetime(date_str: str, time_str: str) -> Optional[datetime]:
-    \"\"\"'26.11.2025', '18:44:28' -> datetime.\"\"\"
+    """'26.11.2025', '18:44:28' -> datetime."""
     try:
         d = datetime.strptime(date_str.strip(), "%d.%m.%Y").date()
         t = datetime.strptime(time_str.strip(), "%H:%M:%S").time()
@@ -61,10 +61,10 @@ def combine_datetime(date_str: str, time_str: str) -> Optional[datetime]:
 
 
 def parse_skill_code(skill_str: str) -> Optional[str]:
-    \"\"\"
+    """
     Из поля Split/Skill берём только код (первое число до пробела/скобки).
     Например: '1 (Надежность)' -> '1'
-    \"\"\"
+    """
     if not skill_str:
         return None
     s = skill_str.strip()
@@ -76,11 +76,11 @@ def parse_skill_code(skill_str: str) -> Optional[str]:
 
 
 def is_within_night_shift(dt: datetime) -> bool:
-    \"\"\"
+    """
     Проверяем, попадает ли datetime в ночную смену 18:30–06:30.
     Ночная смена "через полночь":
       всё >= 18:30 ИЛИ < 06:30.
-    \"\"\"
+    """
     if dt is None:
         return False
     total_minutes = dt.hour * 60 + dt.minute
@@ -90,12 +90,12 @@ def is_within_night_shift(dt: datetime) -> bool:
 
 
 def get_shift_date(dt: datetime) -> datetime.date:
-    \"\"\"
+    """
     Дата ночной смены:
       - если время >= 18:30 -> смена этой даты
       - если время < 06:30 -> смена предыдущей даты
     Пример: 04.12 03:00 -> смена 03.12.
-    \"\"\"
+    """
     total_minutes = dt.hour * 60 + dt.minute
     start = NIGHT_START_HOUR * 60 + NIGHT_START_MINUTE
     if total_minutes >= start:
@@ -105,7 +105,7 @@ def get_shift_date(dt: datetime) -> datetime.date:
 
 
 def floor_to_half_hour(dt: datetime) -> datetime:
-    \"\"\"Округление вниз до начала получаса (17:05 -> 17:00, 17:45 -> 17:30).\"\"\"
+    """Округление вниз до начала получаса (17:05 -> 17:00, 17:45 -> 17:30)."""
     minute = (dt.minute // 30) * 30
     return dt.replace(minute=minute, second=0, microsecond=0)
 
@@ -203,7 +203,7 @@ def load_calls_from_html_text(html_text: str) -> pd.DataFrame:
 # --- АНАЛИТИКА ---
 
 def build_slot_range(shift_date: datetime.date) -> pd.DatetimeIndex:
-    \"\"\"Все получасы с 18:30 shift_date до 06:30 следующего дня.\"\"\"
+    """Все получасы с 18:30 shift_date до 06:30 следующего дня."""
     start_dt = datetime.combine(shift_date, time(NIGHT_START_HOUR, NIGHT_START_MINUTE))
     end_dt = datetime.combine(shift_date + timedelta(days=1),
                               time(NIGHT_END_HOUR, NIGHT_END_MINUTE))
@@ -212,7 +212,7 @@ def build_slot_range(shift_date: datetime.date) -> pd.DatetimeIndex:
 
 
 def build_summary_tables(df_shift: pd.DataFrame, agent_name_map: dict):
-    \"\"\"Строит сводные таблицы по выбранной смене.\"\"\"
+    """Строит сводные таблицы по выбранной смене."""
 
     df = df_shift.copy()
     # "Красивые" имена операторов
@@ -515,8 +515,10 @@ def main():
         "Зелёным — оператор, который в этом получасе принимал звонки. "
         "Розовым — оператор, у которого в это же время были ABAN и ни одного принятого звонка."
     )
-    st.dataframe(style_worked_while_other_missed(summary["worked_while_other_missed"]),
-                 use_container_width=True)
+    st.dataframe(
+        style_worked_while_other_missed(summary["worked_while_other_missed"]),
+        use_container_width=True,
+    )
 
 
 if __name__ == "__main__":
