@@ -13,6 +13,9 @@ NIGHT_START_MINUTE = 30
 NIGHT_END_HOUR = 6
 NIGHT_END_MINUTE = 30
 
+# Окно "начала смены" для отсека дневных операторов (в минутах от старта ночи)
+DAY_LEFTOVER_WINDOW_MIN = 60
+
 # Тематики, которые отслеживаем
 WATCHED_SKILLS = {"1", "3", "9"}
 SKILL_NAMES = {
@@ -211,6 +214,35 @@ def build_slot_range(shift_date: datetime.date) -> pd.DatetimeIndex:
     return pd.date_range(start=start_dt, end=end_dt, freq="30min", inclusive="left")
 
 
+def drop_day_leftover_agents(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Убирает операторов, которые фигурируют только в самом начале ночной смены,
+    считая, что они просто задержались с дневной смены.
+    Правило: если последний вызов оператора был в первые DAY_LEFTOVER_WINDOW_MIN минут
+    от начала смены, и дальше его нет, оператор исключается.
+    """
+    if df.empty:
+        return df
+
+    shift_date = df["shift_date"].iloc[0]
+    shift_start = datetime.combine(shift_date, time(NIGHT_START_HOUR, NIGHT_START_MINUTE))
+    window_end = shift_start + timedelta(minutes=DAY_LEFTOVER_WINDOW_MIN)
+
+    # максимум времени по каждому оператору
+    by_agent = (
+        df[df["agent_code"].notna()]
+        .groupby("agent_code")["datetime"]
+        .max()
+    )
+
+    leftover_codes = by_agent[by_agent <= window_end].index.tolist()
+
+    if not leftover_codes:
+        return df
+
+    return df[~df["agent_code"].isin(leftover_codes)].copy()
+
+
 def build_summary_tables(df_shift: pd.DataFrame, agent_name_map: dict):
     """Строит сводные таблицы по выбранной смене."""
 
@@ -221,7 +253,7 @@ def build_summary_tables(df_shift: pd.DataFrame, agent_name_map: dict):
     # Принятые вызовы (ANS)
     ans = df[(df["disposition"] == "ANS") & df["agent"].notna()].copy()
 
-    # "Проспанные" звонки конкретным оператором (ABAN, но оператор указан, тематики 1/3/9)
+    # "Пропущенные" звонки конкретным оператором (ABAN, но оператор указан, тематики 1/3/9)
     missed_by_agent = df[
         (df["disposition"] == "ABAN") &
         (df["skill_code"].isin(WATCHED_SKILLS)) &
@@ -261,7 +293,7 @@ def build_summary_tables(df_shift: pd.DataFrame, agent_name_map: dict):
         accepted_counts = pd.DataFrame(columns=["slot_start", "agent", "calls"])
         accepted_pivot = pd.DataFrame(index=slots)
 
-    # --- Проспанные звонки по операторам (по получасам) ---
+    # --- Пропущенные звонки по операторам (по получасам) ---
     if not missed_by_agent.empty:
         missed_counts = (
             missed_by_agent.groupby(["slot_start", "agent"])
@@ -290,7 +322,7 @@ def build_summary_tables(df_shift: pd.DataFrame, agent_name_map: dict):
     else:
         accepted_topics = pd.DataFrame(columns=["slot_start", "agent", "topic", "calls"])
 
-    # --- Детализация по тематикам для проспанных (с оператором) ---
+    # --- Детализация по тематикам для пропущенных (с оператором) ---
     if not missed_by_agent.empty:
         missed_topics = (
             missed_by_agent.groupby(["slot_start", "agent", "topic"])
@@ -312,7 +344,7 @@ def build_summary_tables(df_shift: pd.DataFrame, agent_name_map: dict):
     else:
         missed_no_agent_topics = pd.DataFrame(columns=["slot_start", "topic", "missed_calls"])
 
-    # --- Сводная таблица по каждому оператору в каждом получасе (для логики "один работал, другой проспал") ---
+    # --- Сводная таблица по каждому оператору в каждом получасе (для логики "один работал, другой пропускал") ---
 
     # accepted_counts: slot_start, agent, calls
     # missed_counts:   slot_start, agent, missed_calls
@@ -331,7 +363,7 @@ def build_summary_tables(df_shift: pd.DataFrame, agent_name_map: dict):
         slot_agent["calls"] = slot_agent["calls"].astype(int)
         slot_agent["missed_calls"] = slot_agent["missed_calls"].astype(int)
 
-    # --- 1) Получасовки, где были проспанные звонки и НИ ОДНОГО принятого ---
+    # --- 1) Получасовки, где были пропущенные звонки и НИ ОДНОГО принятого ---
     if not slot_agent.empty:
         total_per_slot = (
             slot_agent.groupby("slot_start")
@@ -348,7 +380,7 @@ def build_summary_tables(df_shift: pd.DataFrame, agent_name_map: dict):
     else:
         slots_only_missed = pd.DataFrame(columns=["slot_start", "total_accepted", "total_missed"])
 
-    # --- 2) Ситуации "один работал, пока другой проспал звонки" ---
+    # --- 2) Ситуации "один работал, пока другой пропускал звонки" ---
     worked_while_other_missed_records = []
 
     if not slot_agent.empty:
@@ -363,7 +395,7 @@ def build_summary_tables(df_shift: pd.DataFrame, agent_name_map: dict):
                 # никто не принимал — нас интересует другой кейс (slots_only_missed)
                 continue
 
-            # кто в этом получасе проспал звонки (missed > 0, но ничего не принял)
+            # кто в этом получасе пропускал звонки (missed > 0, но ничего не принял)
             sleepers = sa_slot[
                 (sa_slot["missed_calls"] > 0) & (sa_slot["calls"] == 0)
             ]
@@ -404,7 +436,8 @@ def style_accepted(df: pd.DataFrame):
     if df.empty:
         return df
     return df.style.applymap(
-        lambda v: "background-color: #d4f4dd" if isinstance(v, (int, float)) and v > 0 else ""
+        lambda v: "background-color: #e6ffed; color: black; font-weight: 600"
+        if isinstance(v, (int, float)) and v > 0 else ""
     )
 
 
@@ -412,15 +445,18 @@ def style_missed(df: pd.DataFrame):
     if df.empty:
         return df
     return df.style.applymap(
-        lambda v: "background-color: #fbe4e6" if isinstance(v, (int, float)) and v > 0 else ""
+        lambda v: "background-color: #ffe6f0; color: black; font-weight: 600"
+        if isinstance(v, (int, float)) and v > 0 else ""
     )
 
 
 def style_slots_only_missed(df: pd.DataFrame):
     if df.empty:
         return df
+
     def _row_style(_row):
-        return ["background-color: #fbe4e6"] * len(_row)
+        return ["background-color: #ffe6f0; color: black; font-weight: 600"] * len(_row)
+
     return df.style.apply(_row_style, axis=1)
 
 
@@ -432,9 +468,9 @@ def style_worked_while_other_missed(df: pd.DataFrame):
     def _row_style(row):
         styles = [""] * len(cols)
         if "worker_agent" in cols:
-            styles[cols.index("worker_agent")] = "background-color: #d4f4dd"
+            styles[cols.index("worker_agent")] = "background-color: #e6ffed; color: black; font-weight: 600"
         if "sleeper_agent" in cols:
-            styles[cols.index("sleeper_agent")] = "background-color: #fbe4e6"
+            styles[cols.index("sleeper_agent")] = "background-color: #ffe6f0; color: black; font-weight: 600"
         return styles
 
     return df.style.apply(_row_style, axis=1)
@@ -443,7 +479,7 @@ def style_worked_while_other_missed(df: pd.DataFrame):
 # --- STREAMLIT UI ---
 
 def main():
-    st.title("Аналитика ночной смены: принятые и проспанные звонки")
+    st.title("Аналитика ночной смены: принятые и пропущенные звонки")
 
     uploaded_file = st.file_uploader("Загрузите HTML-отчёт Avaya", type=["html", "htm"])
     if not uploaded_file:
@@ -458,21 +494,20 @@ def main():
         st.warning("После отбора по ночной смене (18:30–06:30) записи не найдены.")
         return
 
-    # Выбор даты ночной смены
-    shift_dates = sorted(df_all["shift_date"].unique())
-    selected_shift_date = st.selectbox(
-        "Выберите дату ночной смены (дата вечера, с которого начинается смена):",
-        options=shift_dates,
-        format_func=lambda d: d.strftime("%d.%m.%Y"),
-    )
+    # В каждом HTML — одна ночная смена, выбор даты не нужен
+    shift_date = df_all["shift_date"].iloc[0]
 
-    df_shift = df_all[df_all["shift_date"] == selected_shift_date].copy()
+    # Отсекаем операторов, которые чуть задержались с дневной смены
+    df_all = drop_day_leftover_agents(df_all)
+
+    df_shift = df_all.copy()
+
     st.subheader(
-        f"Ночная смена: {selected_shift_date.strftime('%d.%m.%Y')} 18:30 "
-        f"– {(selected_shift_date + timedelta(days=1)).strftime('%d.%m.%Y')} 06:30"
+        f"Ночная смена: {shift_date.strftime('%d.%m.%Y')} 18:30 "
+        f"– {(shift_date + timedelta(days=1)).strftime('%d.%m.%Y')} 06:30"
     )
 
-    # Список операторов (коды)
+    # Список операторов (коды) после фильтрации
     agent_codes = sorted(df_shift["agent_code"].dropna().unique())
     st.markdown("### Имена операторов")
     st.caption("Можно переименовать коды операторов для удобства (как их зовут в эту смену).")
@@ -490,30 +525,30 @@ def main():
     st.caption("Зелёным подсвечены ячейки, где у оператора были принятые звонки в данном получасе.")
     st.dataframe(style_accepted(summary["accepted_pivot"]), use_container_width=True)
 
-    st.markdown("### Проспанные звонки по получасам и операторам (ABAN с оператором)")
+    st.markdown("### Пропущенные звонки по получасам и операторам (ABAN с оператором)")
     st.caption(
-        "Розовым подсвечены ячейки, где у оператора были ABAN по тематикам 1/3/9 "
-        "(клиент не дождался ответа, хотя оператор был привязан)."
+        "Розовым подсвечены ячейки, где у оператора были пропущенные звонки (ABAN) по тематикам 1/3/9 "
+        "— клиент не дождался ответа, хотя оператор был привязан."
     )
     st.dataframe(style_missed(summary["missed_pivot"]), use_container_width=True)
 
     st.markdown("### Детализация принятых звонков по тематикам")
     st.dataframe(summary["accepted_topics"], use_container_width=True)
 
-    st.markdown("### Детализация проспанных звонков по тематикам (с оператором)")
+    st.markdown("### Детализация пропущенных звонков по тематикам (с оператором)")
     st.dataframe(summary["missed_topics"], use_container_width=True)
 
     st.markdown("### Звонки, которые никто не принял (ABAN без оператора, тематики 1/3/9)")
     st.dataframe(summary["missed_no_agent_topics"], use_container_width=True)
 
-    st.markdown("### Получасовки, где были проспанные звонки и ни одного принятого")
-    st.caption("В этих интервалах были ABAN-звонки (тематики 1/3/9), и ни один оператор не принял ни одного звонка.")
+    st.markdown("### Получасовки, где были пропущенные звонки и ни одного принятого")
+    st.caption("В этих интервалах были пропущенные звонки (ABAN по тематикам 1/3/9), и ни один оператор не принял ни одного звонка.")
     st.dataframe(style_slots_only_missed(summary["slots_only_missed"]), use_container_width=True)
 
     st.markdown("### Ситуации: один оператор работал, пока другой пропускал звонки")
     st.caption(
         "Зелёным — оператор, который в этом получасе принимал звонки. "
-        "Розовым — оператор, у которого в это же время были ABAN и ни одного принятого звонка."
+        "Розовым — оператор, у которого в это же время были пропущенные звонки (ABAN) и ни одного принятого."
     )
     st.dataframe(
         style_worked_while_other_missed(summary["worked_while_other_missed"]),
