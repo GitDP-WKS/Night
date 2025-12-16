@@ -667,3 +667,4 @@ st.download_button(
 if show_raw:
     st.markdown("### Сырые события (первые 2000 строк)")
     st.dataframe(events.head(2000), use_container_width=True)
+
