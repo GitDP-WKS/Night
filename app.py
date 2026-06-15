@@ -398,6 +398,25 @@ def slot_label(slot_value) -> str:
     return f"{start:%d.%m %H:%M}-{(start + pd.Timedelta(minutes=30)):%H:%M}"
 
 
+def build_period_title(window: Optional[Tuple[datetime, datetime]], shift_name: str) -> str:
+    if window:
+        return f"{shift_name}: {window[0]:%d.%m.%Y %H:%M} - {window[1]:%d.%m.%Y %H:%M}"
+    return shift_name
+
+
+def build_period_slug(window: Optional[Tuple[datetime, datetime]], shift_name: str) -> str:
+    if "Ночная" in shift_name:
+        shift_slug = "nochnaya_smena"
+    elif "Дневная" in shift_name:
+        shift_slug = "dnevnaya_smena"
+    else:
+        shift_slug = "kastom_smena"
+
+    if window:
+        return f"{shift_slug}_{window[0]:%Y-%m-%d_%H-%M}_{window[1]:%Y-%m-%d_%H-%M}"
+    return shift_slug
+
+
 def build_profiles(df_operator: pd.DataFrame, window: Optional[Tuple[datetime, datetime]]) -> pd.DataFrame:
     if df_operator.empty:
         return pd.DataFrame()
@@ -584,9 +603,9 @@ def color_missed_matrix(df: pd.DataFrame):
 
 
 @st.cache_data(show_spinner=False, max_entries=3)
-def make_excel_report_cached(metrics: Dict[str, pd.DataFrame], summary_lines: List[str], risk: str, include_events: bool) -> bytes:
+def make_excel_report_cached(metrics: Dict[str, pd.DataFrame], summary_lines: List[str], risk: str, period_title: str, include_events: bool) -> bytes:
     output = io.BytesIO()
-    summary_df = pd.DataFrame({"Показатель": ["Риск-статус"] + [f"Вывод {i + 1}" for i in range(len(summary_lines))], "Значение": [risk] + summary_lines})
+    summary_df = pd.DataFrame({"Показатель": ["Аналитический период", "Риск-статус"] + [f"Вывод {i + 1}" for i in range(len(summary_lines))], "Значение": [period_title, risk] + summary_lines})
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         summary_df.to_excel(writer, index=False, sheet_name="Итог")
         sheet_map = {"timeseries": "Динамика", "operators": "Операторы", "profiles": "Профили", "skills": "Тематики", "anomalies": "Аномалии", "peaks": "Пики"}
@@ -599,7 +618,7 @@ def make_excel_report_cached(metrics: Dict[str, pd.DataFrame], summary_lines: Li
 
 
 @st.cache_data(show_spinner=False, max_entries=3)
-def make_word_report_cached(metrics: Dict[str, pd.DataFrame], summary_lines: List[str], risk: str) -> bytes:
+def make_word_report_cached(metrics: Dict[str, pd.DataFrame], summary_lines: List[str], risk: str, period_title: str) -> bytes:
     def to_html(df: pd.DataFrame, limit: int = 200) -> str:
         if df is None or df.empty:
             return "<p>Нет данных</p>"
@@ -610,7 +629,7 @@ def make_word_report_cached(metrics: Dict[str, pd.DataFrame], summary_lines: Lis
     table {{ border-collapse: collapse; width: 100%; margin-bottom: 18px; }}
     th, td {{ border: 1px solid #999; padding: 6px; }} th {{ background: #f2f2f2; }}
     </style></head><body>
-    <h1>Анализ смены Avaya CMS</h1><h2>Риск-статус: {risk}</h2>
+    <h1>Анализ смены Avaya CMS</h1><h2>{period_title}</h2><h2>Риск-статус: {risk}</h2>
     <h2>Автоматический вывод</h2><ul>{''.join(f'<li>{line}</li>' for line in summary_lines)}</ul>
     <h2>KPI</h2>{to_html(metrics.get('kpi'))}
     <h2>Аномалии</h2>{to_html(metrics.get('anomalies'))}
@@ -776,11 +795,14 @@ metrics = compute_metrics(df_shift, [str(x) for x in watched_skills], only_watch
 kpi = metrics["kpi"].iloc[0].to_dict()
 risk, reasons = assess_risk(kpi, metrics["anomalies"], float(yellow), float(red))
 summary = build_summary(metrics, risk, reasons, window, hidden_presence, inactive_codes)
+period_title = build_period_title(window, shift.name)
+period_slug = build_period_slug(window, shift.name)
 
 if window:
     st.subheader(f"Окно анализа: {window[0]:%d.%m.%Y %H:%M} - {window[1]:%d.%m.%Y %H:%M} ({shift.name})")
 else:
     st.subheader(f"Окно анализа: {shift.name}")
+st.caption(f"Название аналитического периода для отчетов: {period_title}")
 
 with st.expander("Проверка входного файла", expanded=False):
     st.dataframe(pd.DataFrame([{"Поле": k, "Колонка": v or "Не найдена"} for k, v in found_cols.items()]), use_container_width=True)
@@ -856,22 +878,22 @@ else:
     st.caption("Матрица скрыта безопасным режимом. Ее можно включить в боковой панели.")
 
 st.markdown("### Экспорт")
-st.caption("Файлы формируются только по кнопке. Это снижает риск черного экрана после загрузки больших HTML-отчетов.")
+st.caption("Файлы формируются только по кнопке. В название каждого файла добавляется аналитический период.")
 if st.button("Подготовить файлы для скачивания", use_container_width=True):
     st.session_state.exports_ready = True
 
 if st.session_state.exports_ready:
     with st.spinner("Готовлю файлы..."):
-        excel_bytes = make_excel_report_cached(metrics, summary, risk, include_events_in_excel)
-        word_bytes = make_word_report_cached(metrics, summary, risk)
+        excel_bytes = make_excel_report_cached(metrics, summary, risk, period_title, include_events_in_excel)
+        word_bytes = make_word_report_cached(metrics, summary, risk, period_title)
         csv_bytes = make_csv_cached(metrics["events"])
     e1, e2, e3 = st.columns(3)
     with e1:
-        safe_download_button("Скачать Excel", data=excel_bytes, file_name="avaya_shift_report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        safe_download_button("Скачать Excel", data=excel_bytes, file_name=f"avaya_report_{period_slug}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
     with e2:
-        safe_download_button("Скачать Word", data=word_bytes, file_name="avaya_shift_report.doc", mime="application/msword", use_container_width=True)
+        safe_download_button("Скачать Word", data=word_bytes, file_name=f"avaya_report_{period_slug}.doc", mime="application/msword", use_container_width=True)
     with e3:
-        safe_download_button("Скачать CSV событий", data=csv_bytes, file_name="avaya_shift_events.csv", mime="text/csv", use_container_width=True)
+        safe_download_button("Скачать CSV событий", data=csv_bytes, file_name=f"avaya_events_{period_slug}.csv", mime="text/csv", use_container_width=True)
 
 with st.expander("Сырые события", expanded=False):
     show_table(metrics["events"], rows=500)
