@@ -398,23 +398,45 @@ def slot_label(slot_value) -> str:
     return f"{start:%d.%m %H:%M}-{(start + pd.Timedelta(minutes=30)):%H:%M}"
 
 
-def build_period_title(window: Optional[Tuple[datetime, datetime]], shift_name: str) -> str:
-    if window:
-        return f"{shift_name}: {window[0]:%d.%m.%Y %H:%M} - {window[1]:%d.%m.%Y %H:%M}"
-    return shift_name
-
-
-def build_period_slug(window: Optional[Tuple[datetime, datetime]], shift_name: str) -> str:
-    if "Ночная" in shift_name:
-        shift_slug = "nochnaya_smena"
-    elif "Дневная" in shift_name:
-        shift_slug = "dnevnaya_smena"
+def build_operator_title_part(metrics: Dict[str, pd.DataFrame], max_names: int = 8) -> str:
+    profiles = metrics.get("profiles", pd.DataFrame())
+    operators = metrics.get("operators", pd.DataFrame())
+    if profiles is not None and not profiles.empty and "agent_name" in profiles.columns:
+        names = profiles["agent_name"].dropna().astype(str).tolist()
+    elif operators is not None and not operators.empty and "agent_name" in operators.columns:
+        names = operators["agent_name"].dropna().astype(str).tolist()
     else:
-        shift_slug = "kastom_smena"
+        names = []
+    names = [n.strip() for n in names if n and n.strip() and n.strip() != "Без оператора"]
+    names = list(dict.fromkeys(names))
+    if not names:
+        return "без операторов"
+    shown = names[:max_names]
+    if len(names) > max_names:
+        shown.append(f"и еще {len(names) - max_names}")
+    return ", ".join(shown)
 
-    if window:
-        return f"{shift_slug}_{window[0]:%Y-%m-%d_%H-%M}_{window[1]:%Y-%m-%d_%H-%M}"
-    return shift_slug
+
+def build_period_prefix(window: Optional[Tuple[datetime, datetime]]) -> str:
+    if not window:
+        return "период не выбран"
+    start_dt, end_dt = window
+    if start_dt.date() == end_dt.date():
+        return f"{start_dt:%d.%m.%Y}"
+    if start_dt.year == end_dt.year:
+        return f"{start_dt:%d.%m}-{end_dt:%d.%m.%Y}"
+    return f"{start_dt:%d.%m.%Y}-{end_dt:%d.%m.%Y}"
+
+
+def build_period_title(window: Optional[Tuple[datetime, datetime]], shift_name: str, operators_part: str) -> str:
+    return f"{build_period_prefix(window)} ({operators_part})"
+
+
+def build_report_base_name(window: Optional[Tuple[datetime, datetime]], operators_part: str) -> str:
+    raw = build_period_title(window, "", operators_part)
+    raw = re.sub(r'[\\/:*?"<>|]+', "-", raw)
+    raw = re.sub(r"\s+", " ", raw).strip()
+    return raw[:160]
 
 
 def build_profiles(df_operator: pd.DataFrame, window: Optional[Tuple[datetime, datetime]]) -> pd.DataFrame:
@@ -795,8 +817,9 @@ metrics = compute_metrics(df_shift, [str(x) for x in watched_skills], only_watch
 kpi = metrics["kpi"].iloc[0].to_dict()
 risk, reasons = assess_risk(kpi, metrics["anomalies"], float(yellow), float(red))
 summary = build_summary(metrics, risk, reasons, window, hidden_presence, inactive_codes)
-period_title = build_period_title(window, shift.name)
-period_slug = build_period_slug(window, shift.name)
+operators_part = build_operator_title_part(metrics)
+period_title = build_period_title(window, shift.name, operators_part)
+report_base_name = build_report_base_name(window, operators_part)
 
 if window:
     st.subheader(f"Окно анализа: {window[0]:%d.%m.%Y %H:%M} - {window[1]:%d.%m.%Y %H:%M} ({shift.name})")
@@ -878,7 +901,7 @@ else:
     st.caption("Матрица скрыта безопасным режимом. Ее можно включить в боковой панели.")
 
 st.markdown("### Экспорт")
-st.caption("Файлы формируются только по кнопке. В название каждого файла добавляется аналитический период.")
+st.caption("Файлы формируются только по кнопке. Название начинается с аналитического периода и ФИО операторов.")
 if st.button("Подготовить файлы для скачивания", use_container_width=True):
     st.session_state.exports_ready = True
 
@@ -889,11 +912,11 @@ if st.session_state.exports_ready:
         csv_bytes = make_csv_cached(metrics["events"])
     e1, e2, e3 = st.columns(3)
     with e1:
-        safe_download_button("Скачать Excel", data=excel_bytes, file_name=f"avaya_report_{period_slug}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        safe_download_button("Скачать Excel", data=excel_bytes, file_name=f"{report_base_name} avaya_report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
     with e2:
-        safe_download_button("Скачать Word", data=word_bytes, file_name=f"avaya_report_{period_slug}.doc", mime="application/msword", use_container_width=True)
+        safe_download_button("Скачать Word", data=word_bytes, file_name=f"{report_base_name} avaya_report.doc", mime="application/msword", use_container_width=True)
     with e3:
-        safe_download_button("Скачать CSV событий", data=csv_bytes, file_name=f"avaya_events_{period_slug}.csv", mime="text/csv", use_container_width=True)
+        safe_download_button("Скачать CSV событий", data=csv_bytes, file_name=f"{report_base_name} avaya_events.csv", mime="text/csv", use_container_width=True)
 
 with st.expander("Сырые события", expanded=False):
     show_table(metrics["events"], rows=500)
