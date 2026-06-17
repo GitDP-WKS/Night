@@ -103,6 +103,9 @@ def interval(slot):
     slot = pd.Timestamp(slot)
     return f"{slot:%H:%M}-{(slot + pd.Timedelta(minutes=30)):%H:%M}"
 
+def half_hour_label(order, slot):
+    return f"{int(order):02d} получасовка ({interval(slot)})"
+
 def title_for(window, ops):
     s,e = window
     prefix = f"{s:%d.%m}-{e:%d.%m.%Y}" if s.date()!=e.date() else f"{s:%d.%m.%Y}"
@@ -124,10 +127,10 @@ def build_metrics(df, watched, only_watched, conn_ok, window):
     dyn = dyn.merge(g, on="slot", how="left").fillna(0)
     for c in ("Принято","Пропущено","Пропущено без оператора","Всего"): dyn[c] = dyn[c].astype(int)
     dyn["Порядок"] = range(1, len(dyn)+1)
-    dyn["Ось"] = dyn.apply(lambda r: f"{int(r['Порядок']):02d} | {pd.Timestamp(r['slot']):%H:%M}", axis=1)
+    dyn["Получасовка"] = dyn.apply(lambda r: half_hour_label(r["Порядок"], r["slot"]), axis=1)
     dyn["Время"] = dyn["slot"].dt.strftime("%H:%M")
     dyn["Интервал"] = dyn["slot"].apply(interval)
-    dyn = dyn[["Порядок","Ось","Время","Интервал","Принято","Пропущено","Пропущено без оператора","Всего","slot"]]
+    dyn = dyn[["Порядок","Получасовка","Время","Интервал","Принято","Пропущено","Пропущено без оператора","Всего","slot"]]
 
     agent_ev = ev[ev["agent_code"].astype(str).str.strip()!=""]
     if agent_ev.empty:
@@ -163,7 +166,7 @@ def build_metrics(df, watched, only_watched, conn_ok, window):
     scheme["Кто принял"] = scheme["slot"].map(lambda x: acc_map.get(pd.Timestamp(x),""))
     scheme["Кто пропустил / ответственность"] = scheme["slot"].map(lambda x: miss_map.get(pd.Timestamp(x),""))
     scheme["Без оператора"] = scheme["slot"].map(lambda x: no_map.get(pd.Timestamp(x),0)).astype(int)
-    scheme = scheme[["Порядок","Ось","Время","Принято","Кто принял","Пропущено","Кто пропустил / ответственность","Без оператора","Всего"]]
+    scheme = scheme[["Порядок","Получасовка","Время","Принято","Кто принял","Пропущено","Кто пропустил / ответственность","Без оператора","Всего"]]
 
     total = int(ev["is_missed"].sum()); no_agent = int(ev["is_missed_no_agent"].sum()); in_ops = int(ops["Пропущено"].sum()) if not ops.empty else 0
     dist = pd.DataFrame([{ "Показатель":"Всего пропущено","Значение":total},{"Показатель":"Пропущено с кодом оператора","Значение":int(ev["is_missed_with_agent"].sum())},{"Показатель":"Пропущено без кода оператора","Значение":no_agent},{"Показатель":"Пропущено в таблице операторов","Значение":in_ops},{"Показатель":"Ответственность смены за пропущенные без оператора","Значение":no_agent},{"Показатель":"Контрольное расхождение","Значение":total-in_ops-no_agent}])
@@ -182,7 +185,7 @@ def to_html(df, limit=700):
     return "<p>Нет данных</p>" if df is None or df.empty else df.head(limit).to_html(index=False, border=1, escape=True)
 
 def make_word(m, summary, title):
-    html = f"""<html><head><meta charset="utf-8"><style>@page {{size:A4 landscape;margin:10mm}} body{{font-family:Arial;font-size:9pt}} table{{border-collapse:collapse;width:100%;margin-bottom:12px}} th,td{{border:1px solid #999;padding:4px;vertical-align:top}} th{{background:#f2f2f2}}</style></head><body><h1>Анализ смены Avaya CMS</h1><h2>{escape(title)}</h2><h2>Вывод</h2><ul>{''.join(f'<li>{escape(str(x))}</li>' for x in summary)}</ul><h2>KPI</h2>{to_html(m['kpi'])}<h2>Проверка распределения пропущенных</h2>{to_html(m['distribution'])}<h2>Динамика по порядку смены</h2><p>Ось: 18:00 -> 07:00. 00:00 находится в середине.</p>{to_html(m['dynamics'],1000)}<h2>Схема смены</h2>{to_html(m['scheme'],1000)}<h2>Кто пропустил</h2>{to_html(m['missed_details'],1000)}<h2>Операторы</h2>{to_html(m['operators'])}<h2>Тематики</h2>{to_html(m['skills'])}<h2>Пики</h2>{to_html(m['peaks'])}<h2>Аномалии</h2>{to_html(m['anomalies'])}</body></html>"""
+    html = f"""<html><head><meta charset="utf-8"><style>@page {{size:A4 landscape;margin:10mm}} body{{font-family:Arial;font-size:9pt}} table{{border-collapse:collapse;width:100%;margin-bottom:12px}} th,td{{border:1px solid #999;padding:4px;vertical-align:top}} th{{background:#f2f2f2}}</style></head><body><h1>Анализ смены Avaya CMS</h1><h2>{escape(title)}</h2><h2>Вывод</h2><ul>{''.join(f'<li>{escape(str(x))}</li>' for x in summary)}</ul><h2>KPI</h2>{to_html(m['kpi'])}<h2>Проверка распределения пропущенных</h2>{to_html(m['distribution'])}<h2>Динамика по получасовкам</h2><p>Ось: получасовки смены от 18:00 до 07:00. 00:00 находится в середине.</p>{to_html(m['dynamics'],1000)}<h2>Схема смены</h2>{to_html(m['scheme'],1000)}<h2>Кто пропустил</h2>{to_html(m['missed_details'],1000)}<h2>Операторы</h2>{to_html(m['operators'])}<h2>Тематики</h2>{to_html(m['skills'])}<h2>Пики</h2>{to_html(m['peaks'])}<h2>Аномалии</h2>{to_html(m['anomalies'])}</body></html>"""
     return html.encode("utf-8")
 
 def make_excel(m, summary, title):
@@ -194,9 +197,9 @@ def make_excel(m, summary, title):
         pd.DataFrame({"Вывод": summary}).to_excel(w, index=False, sheet_name="Итог")
         for k,s in {"distribution":"Проверка","dynamics":"Динамика","scheme":"Схема смены","missed_details":"Кто пропустил","operators":"Операторы","skills":"Тематики","peaks":"Пики","anomalies":"Аномалии"}.items(): m[k].to_excel(w, index=False, sheet_name=s)
         wb = w.book; ws = wb["Динамика"]; chart_ws = wb.create_sheet("График",1)
-        chart_ws["A1"] = "Динамика по порядку смены"; chart_ws["A2"] = "Ось: 18:00 -> 07:00. 00:00 находится в середине."
+        chart_ws["A1"] = "Динамика по получасовкам"; chart_ws["A2"] = "Ось: получасовки смены от 18:00 до 07:00. 00:00 находится в середине."
         if ws.max_row >= 2:
-            chart = BarChart(); chart.title = "Принято / пропущено по получасам"
+            chart = BarChart(); chart.title = "Принято / пропущено по получасовкам"
             data = Reference(ws, min_col=5, max_col=7, min_row=1, max_row=ws.max_row)
             cats = Reference(ws, min_col=2, min_row=2, max_row=ws.max_row)
             chart.add_data(data, titles_from_data=True); chart.set_categories(cats); chart.width = 38; chart.height = 16
@@ -230,13 +233,13 @@ day = st.selectbox("Дата смены", dates, format_func=lambda d: d.strftim
 window = shift_bounds(day, mode); df_shift = df[(df["dt_start"]>=pd.Timestamp(window[0])) & (df["dt_start"]<pd.Timestamp(window[1]))].copy()
 metrics, title = build_metrics(df_shift, watched, only_watched, conn_ok, window)
 kpi = metrics["kpi"].iloc[0].to_dict(); diff = int(metrics["distribution"].loc[metrics["distribution"]["Показатель"]=="Контрольное расхождение","Значение"].iloc[0])
-summary = [f"Окно анализа: {window[0]:%d.%m.%Y %H:%M} - {window[1]:%d.%m.%Y %H:%M}.", f"Итог: принято {int(kpi['Принято'])}, пропущено {int(kpi['Пропущено'])}, без кода оператора {int(kpi['Пропущено без оператора'])}.", "Контроль распределения пропущенных: расхождение 0." if diff==0 else f"Контроль распределения пропущенных: расхождение {diff}.", "Динамика построена по порядку смены: 18:00 -> 07:00, 00:00 в середине."]
+summary = [f"Окно анализа: {window[0]:%d.%m.%Y %H:%M} - {window[1]:%d.%m.%Y %H:%M}.", f"Итог: принято {int(kpi['Принято'])}, пропущено {int(kpi['Пропущено'])}, без кода оператора {int(kpi['Пропущено без оператора'])}.", "Контроль распределения пропущенных: расхождение 0." if diff==0 else f"Контроль распределения пропущенных: расхождение {diff}.", "Динамика построена по получасовкам смены: 18:00 -> 07:00, 00:00 в середине."]
 st.subheader(title)
 for x in summary: st.write("- " + x)
 c1,c2,c3,c4 = st.columns(4); c1.metric("Принято", int(kpi["Принято"])); c2.metric("Пропущено", int(kpi["Пропущено"])); c3.metric("Без оператора", int(kpi["Пропущено без оператора"])); c4.metric("% пропущенных", f"{kpi['% пропущенных']}%")
 st.markdown("### Проверка распределения пропущенных"); show(metrics["distribution"])
-st.markdown("### Динамика по порядку смены"); st.caption("Ось построена строго по порядку смены: 18:00 -> 07:00. 00:00 находится в середине."); show(metrics["dynamics"], rows=1000)
-if show_chart: st.bar_chart(metrics["dynamics"].set_index("Порядок")[["Принято","Пропущено","Пропущено без оператора"]]); st.caption("На графике X = Порядок смены, расшифровка порядка выше.")
+st.markdown("### Динамика по получасовкам"); st.caption("Ось построена по получасовкам смены: 01 получасовка (18:00-18:30) -> ... -> 00:00 в середине."); show(metrics["dynamics"], rows=1000)
+if show_chart: st.bar_chart(metrics["dynamics"].set_index("Получасовка")[["Принято","Пропущено","Пропущено без оператора"]]); st.caption("На графике X = получасовки смены, а не просто числа.")
 st.markdown("### Схема смены"); show(metrics["scheme"], rows=1000)
 st.markdown("### Кто и во сколько пропустил"); show(metrics["missed_details"], rows=1000)
 left,right = st.columns(2)
