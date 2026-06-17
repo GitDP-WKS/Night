@@ -181,6 +181,22 @@ def show(df, rows=300):
     if df is None or df.empty: st.caption("Нет данных")
     else: st.dataframe(df.head(rows), use_container_width=True)
 
+def render_dynamics_chart(df):
+    value_cols = ["Принято", "Пропущено", "Пропущено без оператора"]
+    chart_df = df[["Порядок", "Получасовка"] + value_cols].melt(id_vars=["Порядок", "Получасовка"], value_vars=value_cols, var_name="Показатель", value_name="Количество")
+    time_order = df.sort_values("Порядок")["Получасовка"].astype(str).tolist()
+    spec = {
+        "mark": {"type": "bar"},
+        "encoding": {
+            "x": {"field": "Получасовка", "type": "ordinal", "sort": time_order, "axis": {"title": "Время", "labelAngle": 0, "labelOverlap": False, "labelLimit": 45}},
+            "y": {"field": "Количество", "type": "quantitative", "axis": {"title": "Количество"}},
+            "color": {"field": "Показатель", "type": "nominal"},
+            "tooltip": [{"field": "Получасовка", "type": "ordinal", "title": "Время"}, {"field": "Показатель", "type": "nominal"}, {"field": "Количество", "type": "quantitative"}],
+        },
+        "height": 360,
+    }
+    st.vega_lite_chart(chart_df, spec, use_container_width=True)
+
 def to_html(df, limit=700):
     return "<p>Нет данных</p>" if df is None or df.empty else df.head(limit).to_html(index=False, border=1, escape=True)
 
@@ -238,8 +254,8 @@ st.subheader(title)
 for x in summary: st.write("- " + x)
 c1,c2,c3,c4 = st.columns(4); c1.metric("Принято", int(kpi["Принято"])); c2.metric("Пропущено", int(kpi["Пропущено"])); c3.metric("Без оператора", int(kpi["Пропущено без оператора"])); c4.metric("% пропущенных", f"{kpi['% пропущенных']}%")
 st.markdown("### Проверка распределения пропущенных"); show(metrics["distribution"])
-st.markdown("### Динамика по времени"); st.caption("Ось: 18:00, 18:30, 19:00 ... 00:00 находится в середине."); show(metrics["dynamics"], rows=1000)
-if show_chart: st.bar_chart(metrics["dynamics"].set_index("Получасовка")[["Принято","Пропущено","Пропущено без оператора"]]); st.caption("На графике X = время получасового интервала.")
+st.markdown("### Динамика по времени"); st.caption("Ось: 18:00, 18:30, 19:00 ... 00:00 находится в середине. Порядок зафиксирован отдельно и не сортируется как время суток."); show(metrics["dynamics"], rows=1000)
+if show_chart: render_dynamics_chart(metrics["dynamics"]); st.caption("На графике X = время получасового интервала, порядок закреплен по смене.")
 st.markdown("### Схема смены"); show(metrics["scheme"], rows=1000)
 st.markdown("### Кто и во сколько пропустил"); show(metrics["missed_details"], rows=1000)
 left,right = st.columns(2)
