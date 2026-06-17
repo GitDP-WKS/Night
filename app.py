@@ -104,7 +104,7 @@ def interval(slot):
     return f"{slot:%H:%M}-{(slot + pd.Timedelta(minutes=30)):%H:%M}"
 
 def half_hour_label(order, slot):
-    return f"{int(order):02d} получасовка ({interval(slot)})"
+    return f"{pd.Timestamp(slot):%H:%M}"
 
 def title_for(window, ops):
     s,e = window
@@ -185,7 +185,7 @@ def to_html(df, limit=700):
     return "<p>Нет данных</p>" if df is None or df.empty else df.head(limit).to_html(index=False, border=1, escape=True)
 
 def make_word(m, summary, title):
-    html = f"""<html><head><meta charset="utf-8"><style>@page {{size:A4 landscape;margin:10mm}} body{{font-family:Arial;font-size:9pt}} table{{border-collapse:collapse;width:100%;margin-bottom:12px}} th,td{{border:1px solid #999;padding:4px;vertical-align:top}} th{{background:#f2f2f2}}</style></head><body><h1>Анализ смены Avaya CMS</h1><h2>{escape(title)}</h2><h2>Вывод</h2><ul>{''.join(f'<li>{escape(str(x))}</li>' for x in summary)}</ul><h2>KPI</h2>{to_html(m['kpi'])}<h2>Проверка распределения пропущенных</h2>{to_html(m['distribution'])}<h2>Динамика по получасовкам</h2><p>Ось: получасовки смены от 18:00 до 07:00. 00:00 находится в середине.</p>{to_html(m['dynamics'],1000)}<h2>Схема смены</h2>{to_html(m['scheme'],1000)}<h2>Кто пропустил</h2>{to_html(m['missed_details'],1000)}<h2>Операторы</h2>{to_html(m['operators'])}<h2>Тематики</h2>{to_html(m['skills'])}<h2>Пики</h2>{to_html(m['peaks'])}<h2>Аномалии</h2>{to_html(m['anomalies'])}</body></html>"""
+    html = f"""<html><head><meta charset="utf-8"><style>@page {{size:A4 landscape;margin:10mm}} body{{font-family:Arial;font-size:9pt}} table{{border-collapse:collapse;width:100%;margin-bottom:12px}} th,td{{border:1px solid #999;padding:4px;vertical-align:top}} th{{background:#f2f2f2}}</style></head><body><h1>Анализ смены Avaya CMS</h1><h2>{escape(title)}</h2><h2>Вывод</h2><ul>{''.join(f'<li>{escape(str(x))}</li>' for x in summary)}</ul><h2>KPI</h2>{to_html(m['kpi'])}<h2>Проверка распределения пропущенных</h2>{to_html(m['distribution'])}<h2>Динамика по времени</h2><p>Ось: 18:00, 18:30, 19:00 ... 00:00 находится в середине.</p>{to_html(m['dynamics'],1000)}<h2>Схема смены</h2>{to_html(m['scheme'],1000)}<h2>Кто пропустил</h2>{to_html(m['missed_details'],1000)}<h2>Операторы</h2>{to_html(m['operators'])}<h2>Тематики</h2>{to_html(m['skills'])}<h2>Пики</h2>{to_html(m['peaks'])}<h2>Аномалии</h2>{to_html(m['anomalies'])}</body></html>"""
     return html.encode("utf-8")
 
 def make_excel(m, summary, title):
@@ -197,9 +197,9 @@ def make_excel(m, summary, title):
         pd.DataFrame({"Вывод": summary}).to_excel(w, index=False, sheet_name="Итог")
         for k,s in {"distribution":"Проверка","dynamics":"Динамика","scheme":"Схема смены","missed_details":"Кто пропустил","operators":"Операторы","skills":"Тематики","peaks":"Пики","anomalies":"Аномалии"}.items(): m[k].to_excel(w, index=False, sheet_name=s)
         wb = w.book; ws = wb["Динамика"]; chart_ws = wb.create_sheet("График",1)
-        chart_ws["A1"] = "Динамика по получасовкам"; chart_ws["A2"] = "Ось: получасовки смены от 18:00 до 07:00. 00:00 находится в середине."
+        chart_ws["A1"] = "Динамика по времени"; chart_ws["A2"] = "Ось: 18:00, 18:30, 19:00 ... 00:00 находится в середине."
         if ws.max_row >= 2:
-            chart = BarChart(); chart.title = "Принято / пропущено по получасовкам"
+            chart = BarChart(); chart.title = "Принято / пропущено по получасам"
             data = Reference(ws, min_col=5, max_col=7, min_row=1, max_row=ws.max_row)
             cats = Reference(ws, min_col=2, min_row=2, max_row=ws.max_row)
             chart.add_data(data, titles_from_data=True); chart.set_categories(cats); chart.width = 38; chart.height = 16
@@ -233,13 +233,13 @@ day = st.selectbox("Дата смены", dates, format_func=lambda d: d.strftim
 window = shift_bounds(day, mode); df_shift = df[(df["dt_start"]>=pd.Timestamp(window[0])) & (df["dt_start"]<pd.Timestamp(window[1]))].copy()
 metrics, title = build_metrics(df_shift, watched, only_watched, conn_ok, window)
 kpi = metrics["kpi"].iloc[0].to_dict(); diff = int(metrics["distribution"].loc[metrics["distribution"]["Показатель"]=="Контрольное расхождение","Значение"].iloc[0])
-summary = [f"Окно анализа: {window[0]:%d.%m.%Y %H:%M} - {window[1]:%d.%m.%Y %H:%M}.", f"Итог: принято {int(kpi['Принято'])}, пропущено {int(kpi['Пропущено'])}, без кода оператора {int(kpi['Пропущено без оператора'])}.", "Контроль распределения пропущенных: расхождение 0." if diff==0 else f"Контроль распределения пропущенных: расхождение {diff}.", "Динамика построена по получасовкам смены: 18:00 -> 07:00, 00:00 в середине."]
+summary = [f"Окно анализа: {window[0]:%d.%m.%Y %H:%M} - {window[1]:%d.%m.%Y %H:%M}.", f"Итог: принято {int(kpi['Принято'])}, пропущено {int(kpi['Пропущено'])}, без кода оператора {int(kpi['Пропущено без оператора'])}.", "Контроль распределения пропущенных: расхождение 0." if diff==0 else f"Контроль распределения пропущенных: расхождение {diff}.", "Динамика построена по времени получасовых интервалов: 18:00 -> 07:00, 00:00 в середине."]
 st.subheader(title)
 for x in summary: st.write("- " + x)
 c1,c2,c3,c4 = st.columns(4); c1.metric("Принято", int(kpi["Принято"])); c2.metric("Пропущено", int(kpi["Пропущено"])); c3.metric("Без оператора", int(kpi["Пропущено без оператора"])); c4.metric("% пропущенных", f"{kpi['% пропущенных']}%")
 st.markdown("### Проверка распределения пропущенных"); show(metrics["distribution"])
-st.markdown("### Динамика по получасовкам"); st.caption("Ось построена по получасовкам смены: 01 получасовка (18:00-18:30) -> ... -> 00:00 в середине."); show(metrics["dynamics"], rows=1000)
-if show_chart: st.bar_chart(metrics["dynamics"].set_index("Получасовка")[["Принято","Пропущено","Пропущено без оператора"]]); st.caption("На графике X = получасовки смены, а не просто числа.")
+st.markdown("### Динамика по времени"); st.caption("Ось: 18:00, 18:30, 19:00 ... 00:00 находится в середине."); show(metrics["dynamics"], rows=1000)
+if show_chart: st.bar_chart(metrics["dynamics"].set_index("Получасовка")[["Принято","Пропущено","Пропущено без оператора"]]); st.caption("На графике X = время получасового интервала.")
 st.markdown("### Схема смены"); show(metrics["scheme"], rows=1000)
 st.markdown("### Кто и во сколько пропустил"); show(metrics["missed_details"], rows=1000)
 left,right = st.columns(2)
