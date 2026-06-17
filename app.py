@@ -1,8 +1,255 @@
 # app.py
-# Runtime code is compressed to keep the GitHub update atomic.
-import base64
-import zlib
+from __future__ import annotations
+import io, re
+from datetime import date, datetime, time, timedelta
+from html import escape
+import pandas as pd
+import streamlit as st
+from bs4 import BeautifulSoup
 
-exec(compile(zlib.decompress(base64.b64decode(
-    "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"
-)).decode("utf-8"), "app_runtime.py", "exec"))
+st.set_page_config(page_title="Avaya CMS: анализ смен", layout="wide")
+
+AGENTS = {"7599449":"Абусаитов ДМ","7599415":"Аспенбетова АА","7599497":"Ахметзянова РР","7599437":"Воронцов ВВ","7599458":"Гайфуллина ДИ","7599473":"Галиева АР","7599413":"Гараев РР","7599498":"Заббаров АИ","7599405":"Зайнудтинова ЛС","7599411":"Ибрагимова ЛИ","7599403":"Минибаева АИ","7599408":"Сагетдинов МИ","7599478":"Хузахметов АР"}
+SKILLS = {"1":"Надежность","3":"Качество э/э","9":"ЭЗС"}
+ACCEPTED = {"ANS"}
+MISSED = {"ABAN"}
+
+def safe_download_button(*args, **kwargs):
+    kwargs.setdefault("on_click", "ignore")
+    try:
+        return st.download_button(*args, **kwargs)
+    except TypeError:
+        kwargs.pop("on_click", None)
+        return st.download_button(*args, **kwargs)
+
+def decode(data: bytes) -> str:
+    for enc in ("cp1251","windows-1251","utf-8","latin-1"):
+        try: return data.decode(enc)
+        except UnicodeDecodeError: pass
+    return data.decode("utf-8", errors="replace")
+
+def clean(x) -> str:
+    return "" if x is None else str(x).replace("\xa0"," ").strip()
+
+def find_col(df, names):
+    lower = {str(c).lower().strip(): c for c in df.columns}
+    for n in names:
+        if n.lower().strip() in lower:
+            return lower[n.lower().strip()]
+    return None
+
+@st.cache_data(show_spinner=False, max_entries=2)
+def parse_file(data: bytes) -> pd.DataFrame:
+    soup = BeautifulSoup(decode(data), "lxml")
+    tables = soup.find_all("table")
+    if not tables: return pd.DataFrame()
+    def score(t):
+        h = [clean(x.get_text(" ", strip=True)).lower() for x in t.find_all("th")]
+        keys = ("размещение","split/skill","имена пользователей","время нач","date","disposition")
+        return sum(3 for k in keys if any(k in x for x in h)) + len(h)
+    table = max(tables, key=score)
+    headers = [clean(x.get_text(" ", strip=True)) for x in table.find_all("th")]
+    rows = []
+    for tr in table.find_all("tr"):
+        cells = tr.find_all("td")
+        if cells:
+            row = [clean(td.get_text(" ", strip=True)) for td in cells]
+            rows.append((row + [""] * len(headers))[:len(headers)])
+    return pd.DataFrame(rows, columns=headers)
+
+def normalize(raw):
+    if raw.empty: return pd.DataFrame(), ["HTML-таблица не найдена"]
+    cd = find_col(raw, ["Дата","Date"]); ct = find_col(raw, ["Время нач.","Время нач","Time"]); cp = find_col(raw, ["Размещение","Disposition"])
+    cs = find_col(raw, ["Split/Skill","Skill","Split"]); ca = find_col(raw, ["Имена пользователей","Agent","Пользователь","User"])
+    if not cd or not ct or not cp: return pd.DataFrame(), ["Не найдены обязательные колонки: Дата, Время нач., Размещение"]
+    df = raw.copy()
+    dt_text = (df[cd].astype(str).str.strip()+" "+df[ct].astype(str).str.strip()).str.strip()
+    df["dt_start"] = pd.to_datetime(dt_text, format="%d.%m.%Y %H:%M:%S", errors="coerce")
+    if df["dt_start"].isna().all(): df["dt_start"] = pd.to_datetime(dt_text, dayfirst=True, errors="coerce")
+    df = df.dropna(subset=["dt_start"]).reset_index(drop=True)
+    if df.empty: return pd.DataFrame(), ["Дата/время не распознаны"]
+    df["disposition"] = df[cp].astype(str).str.strip().str.upper()
+    df["skill_code"] = ("" if cs is None else df[cs].astype(str).str.strip()).astype(str).str.extract(r"(\d+)", expand=False).fillna("")
+    df["agent_code"] = "" if ca is None else df[ca].astype(str).str.strip()
+    df["agent_code"] = df["agent_code"].replace({"nan":"","None":""})
+    df["agent_name"] = df["agent_code"].map(AGENTS).fillna(df["agent_code"])
+    df.loc[df["agent_code"].astype(str).str.strip()=="","agent_name"] = "Без оператора"
+    df["call_date"] = df["dt_start"].dt.date
+    df["slot"] = df["dt_start"].apply(lambda x: pd.Timestamp(x).replace(minute=0 if x.minute < 30 else 30, second=0, microsecond=0))
+    return df, []
+
+def shift_bounds(base: date, mode: str):
+    if mode == "night":
+        return datetime.combine(base, time(18,30)), datetime.combine(base + timedelta(days=1), time(6,30))
+    return datetime.combine(base, time(6,30)), datetime.combine(base, time(18,30))
+
+def available_dates(df, mode):
+    dates = set(df["call_date"].dropna().tolist())
+    if mode == "night": dates |= {d - timedelta(days=1) for d in dates}
+    out = []
+    for d in sorted(dates):
+        s,e = shift_bounds(d, mode)
+        if ((df["dt_start"] >= pd.Timestamp(s)) & (df["dt_start"] < pd.Timestamp(e))).any(): out.append(d)
+    return out
+
+def axis_slots(window):
+    s,e = window
+    start = pd.Timestamp(s).replace(minute=0, second=0, microsecond=0)
+    end = pd.Timestamp(e)
+    if end.minute or end.second: end = (end + pd.Timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    return list(pd.date_range(start, end, freq="30min"))
+
+def interval(slot):
+    slot = pd.Timestamp(slot)
+    return f"{slot:%H:%M}-{(slot + pd.Timedelta(minutes=30)):%H:%M}"
+
+def title_for(window, ops):
+    s,e = window
+    prefix = f"{s:%d.%m}-{e:%d.%m.%Y}" if s.date()!=e.date() else f"{s:%d.%m.%Y}"
+    names = [] if ops.empty else [x for x in dict.fromkeys(ops["Оператор"].astype(str).tolist()) if x and x!="Без оператора"]
+    return f"{prefix} ({', '.join(names[:8]) if names else 'без операторов'})"
+
+def build_metrics(df, watched, only_watched, conn_ok, window):
+    ev = df.copy()
+    ev["is_accepted"] = ev["disposition"].isin(ACCEPTED | ({"CONN"} if conn_ok else set()))
+    ev["is_missed"] = ev["disposition"].isin(MISSED)
+    if only_watched and watched: ev["is_missed"] = ev["is_missed"] & ev["skill_code"].isin(watched)
+    ev["is_missed_no_agent"] = ev["is_missed"] & (ev["agent_code"].astype(str).str.strip()=="")
+    ev["is_missed_with_agent"] = ev["is_missed"] & (ev["agent_code"].astype(str).str.strip()!="")
+    ev["skill_name"] = ev["skill_code"].map(SKILLS).fillna(ev["skill_code"].replace("", "Без тематики"))
+    ev.loc[ev["skill_name"].astype(str).str.strip()=="","skill_name"] = "Без тематики"
+
+    dyn = pd.DataFrame({"slot": axis_slots(window)})
+    g = ev.groupby("slot").agg(Принято=("is_accepted","sum"), Пропущено=("is_missed","sum"), **{"Пропущено без оператора":("is_missed_no_agent","sum")}, Всего=("disposition","size")).reset_index()
+    dyn = dyn.merge(g, on="slot", how="left").fillna(0)
+    for c in ("Принято","Пропущено","Пропущено без оператора","Всего"): dyn[c] = dyn[c].astype(int)
+    dyn["Порядок"] = range(1, len(dyn)+1)
+    dyn["Ось"] = dyn.apply(lambda r: f"{int(r['Порядок']):02d} | {pd.Timestamp(r['slot']):%H:%M}", axis=1)
+    dyn["Время"] = dyn["slot"].dt.strftime("%H:%M")
+    dyn["Интервал"] = dyn["slot"].apply(interval)
+    dyn = dyn[["Порядок","Ось","Время","Интервал","Принято","Пропущено","Пропущено без оператора","Всего","slot"]]
+
+    agent_ev = ev[ev["agent_code"].astype(str).str.strip()!=""]
+    if agent_ev.empty:
+        ops = pd.DataFrame(columns=["Оператор","Принято","Пропущено","Всего","% пропущенных"])
+    else:
+        ops = agent_ev.groupby("agent_name").agg(Принято=("is_accepted","sum"), Пропущено=("is_missed","sum"), Всего=("disposition","size")).reset_index().rename(columns={"agent_name":"Оператор"})
+        denom = (ops["Принято"]+ops["Пропущено"]).replace(0, pd.NA)
+        ops["% пропущенных"] = (100*ops["Пропущено"]/denom).fillna(0).round(2)
+        ops = ops.sort_values(["Пропущено","Принято"], ascending=[False,False])
+
+    ttl = title_for(window, ops)
+    shift_resp = f"Смена ({ttl.split('(',1)[1].rstrip(')')})"
+    missed = ev[ev["is_missed"]].copy().sort_values("dt_start").reset_index(drop=True)
+    if missed.empty:
+        miss_det = pd.DataFrame(columns=["Порядок","Дата и время","Оператор Avaya","Ответственность","Тематика"])
+    else:
+        missed["Порядок"] = range(1, len(missed)+1)
+        missed["Дата и время"] = missed["dt_start"].dt.strftime("%d.%m.%Y %H:%M:%S")
+        missed["Оператор Avaya"] = missed["agent_name"]
+        missed["Ответственность"] = missed.apply(lambda r: r["agent_name"] if str(r["agent_code"]).strip() else shift_resp, axis=1)
+        missed["Тематика"] = missed["skill_name"]
+        miss_det = missed[["Порядок","Дата и время","Оператор Avaya","Ответственность","Тематика"]]
+
+    acc_map, miss_map, no_map = {}, {}, {}
+    for slot, part in ev[ev["is_accepted"] & (ev["agent_code"].astype(str).str.strip()!="")].groupby("slot"):
+        acc_map[pd.Timestamp(slot)] = "; ".join(f"{k}: {v}" for k,v in part.groupby("agent_name").size().sort_values(ascending=False).items())
+    for slot, part in ev[ev["is_missed"]].groupby("slot"):
+        resp = part.apply(lambda r: r["agent_name"] if str(r["agent_code"]).strip() else shift_resp, axis=1)
+        miss_map[pd.Timestamp(slot)] = "; ".join(f"{k}: {v}" for k,v in resp.value_counts().items())
+        no_map[pd.Timestamp(slot)] = int(part["is_missed_no_agent"].sum())
+
+    scheme = dyn.copy()
+    scheme["Кто принял"] = scheme["slot"].map(lambda x: acc_map.get(pd.Timestamp(x),""))
+    scheme["Кто пропустил / ответственность"] = scheme["slot"].map(lambda x: miss_map.get(pd.Timestamp(x),""))
+    scheme["Без оператора"] = scheme["slot"].map(lambda x: no_map.get(pd.Timestamp(x),0)).astype(int)
+    scheme = scheme[["Порядок","Ось","Время","Принято","Кто принял","Пропущено","Кто пропустил / ответственность","Без оператора","Всего"]]
+
+    total = int(ev["is_missed"].sum()); no_agent = int(ev["is_missed_no_agent"].sum()); in_ops = int(ops["Пропущено"].sum()) if not ops.empty else 0
+    dist = pd.DataFrame([{ "Показатель":"Всего пропущено","Значение":total},{"Показатель":"Пропущено с кодом оператора","Значение":int(ev["is_missed_with_agent"].sum())},{"Показатель":"Пропущено без кода оператора","Значение":no_agent},{"Показатель":"Пропущено в таблице операторов","Значение":in_ops},{"Показатель":"Ответственность смены за пропущенные без оператора","Значение":no_agent},{"Показатель":"Контрольное расхождение","Значение":total-in_ops-no_agent}])
+    skills = ev.groupby("skill_name").agg(Принято=("is_accepted","sum"), Пропущено=("is_missed","sum"), Всего=("disposition","size")).reset_index().rename(columns={"skill_name":"Тематика"}).sort_values(["Пропущено","Принято"], ascending=[False,False])
+    peaks = dyn.drop(columns=["slot"]).sort_values(["Всего","Пропущено"], ascending=[False,False])
+    anomalies = dyn[(dyn["Пропущено"]>0) & ((dyn["Принято"]==0) | (dyn["Пропущено без оператора"]>0))].drop(columns=["slot"]).copy()
+    accepted = int(ev["is_accepted"].sum()); denom = accepted + total
+    kpi = pd.DataFrame([{ "Принято":accepted,"Пропущено":total,"Пропущено без оператора":no_agent,"% пропущенных":round(100*total/denom,2) if denom else 0,"Всего событий":len(ev)}])
+    return {"kpi":kpi,"distribution":dist,"dynamics":dyn.drop(columns=["slot"]),"scheme":scheme,"missed_details":miss_det,"operators":ops,"skills":skills,"peaks":peaks,"anomalies":anomalies,"events":ev}, ttl
+
+def show(df, rows=300):
+    if df is None or df.empty: st.caption("Нет данных")
+    else: st.dataframe(df.head(rows), use_container_width=True)
+
+def to_html(df, limit=700):
+    return "<p>Нет данных</p>" if df is None or df.empty else df.head(limit).to_html(index=False, border=1, escape=True)
+
+def make_word(m, summary, title):
+    html = f"""<html><head><meta charset="utf-8"><style>@page {{size:A4 landscape;margin:10mm}} body{{font-family:Arial;font-size:9pt}} table{{border-collapse:collapse;width:100%;margin-bottom:12px}} th,td{{border:1px solid #999;padding:4px;vertical-align:top}} th{{background:#f2f2f2}}</style></head><body><h1>Анализ смены Avaya CMS</h1><h2>{escape(title)}</h2><h2>Вывод</h2><ul>{''.join(f'<li>{escape(str(x))}</li>' for x in summary)}</ul><h2>KPI</h2>{to_html(m['kpi'])}<h2>Проверка распределения пропущенных</h2>{to_html(m['distribution'])}<h2>Динамика по порядку смены</h2><p>Ось: 18:00 -> 07:00. 00:00 находится в середине.</p>{to_html(m['dynamics'],1000)}<h2>Схема смены</h2>{to_html(m['scheme'],1000)}<h2>Кто пропустил</h2>{to_html(m['missed_details'],1000)}<h2>Операторы</h2>{to_html(m['operators'])}<h2>Тематики</h2>{to_html(m['skills'])}<h2>Пики</h2>{to_html(m['peaks'])}<h2>Аномалии</h2>{to_html(m['anomalies'])}</body></html>"""
+    return html.encode("utf-8")
+
+def make_excel(m, summary, title):
+    from openpyxl.chart import BarChart, Reference
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+    bio = io.BytesIO()
+    with pd.ExcelWriter(bio, engine="openpyxl") as w:
+        pd.DataFrame({"Вывод": summary}).to_excel(w, index=False, sheet_name="Итог")
+        for k,s in {"distribution":"Проверка","dynamics":"Динамика","scheme":"Схема смены","missed_details":"Кто пропустил","operators":"Операторы","skills":"Тематики","peaks":"Пики","anomalies":"Аномалии"}.items(): m[k].to_excel(w, index=False, sheet_name=s)
+        wb = w.book; ws = wb["Динамика"]; chart_ws = wb.create_sheet("График",1)
+        chart_ws["A1"] = "Динамика по порядку смены"; chart_ws["A2"] = "Ось: 18:00 -> 07:00. 00:00 находится в середине."
+        if ws.max_row >= 2:
+            chart = BarChart(); chart.title = "Принято / пропущено по получасам"
+            data = Reference(ws, min_col=5, max_col=7, min_row=1, max_row=ws.max_row)
+            cats = Reference(ws, min_col=2, min_row=2, max_row=ws.max_row)
+            chart.add_data(data, titles_from_data=True); chart.set_categories(cats); chart.width = 38; chart.height = 16
+            chart_ws.add_chart(chart, "A4")
+        for ws in wb.worksheets:
+            ws.page_setup.orientation = "landscape"; ws.page_setup.fitToWidth = 1; ws.freeze_panes = "A2"
+            for cell in ws[1]:
+                cell.font = Font(bold=True); cell.fill = PatternFill("solid", fgColor="EAF2F8"); cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            for i in range(1, min(ws.max_column, 12)+1): ws.column_dimensions[get_column_letter(i)].width = 24
+    return bio.getvalue()
+
+for k,v in {"exports_ready":False,"excel":None,"word":None}.items(): st.session_state.setdefault(k,v)
+
+st.title("Avaya CMS — анализ смен")
+with st.sidebar:
+    uploaded = st.file_uploader("HTML отчет Avaya", type=["html","htm"])
+    mode = st.radio("Смена", ["night","day"], format_func=lambda x: "Ночная (18:30-06:30)" if x=="night" else "Дневная (06:30-18:30)")
+    conn_ok = st.checkbox("Считать CONN как принято", value=False)
+    only_watched = st.checkbox("Пропущенные считать только по выбранным skills", value=(mode=="night"))
+    watched = st.multiselect("Skills", list(SKILLS.keys()), default=list(SKILLS.keys()))
+    show_chart = st.checkbox("Показывать график", value=True)
+
+if uploaded is None:
+    st.info("Загрузи HTML отчет Avaya слева."); st.stop()
+
+raw = parse_file(uploaded.getvalue()); df, problems = normalize(raw)
+if problems: st.error("; ".join(problems)); st.stop()
+dates = available_dates(df, mode)
+if not dates: st.warning("В выбранной смене нет событий."); st.stop()
+day = st.selectbox("Дата смены", dates, format_func=lambda d: d.strftime("%d.%m.%Y"))
+window = shift_bounds(day, mode); df_shift = df[(df["dt_start"]>=pd.Timestamp(window[0])) & (df["dt_start"]<pd.Timestamp(window[1]))].copy()
+metrics, title = build_metrics(df_shift, watched, only_watched, conn_ok, window)
+kpi = metrics["kpi"].iloc[0].to_dict(); diff = int(metrics["distribution"].loc[metrics["distribution"]["Показатель"]=="Контрольное расхождение","Значение"].iloc[0])
+summary = [f"Окно анализа: {window[0]:%d.%m.%Y %H:%M} - {window[1]:%d.%m.%Y %H:%M}.", f"Итог: принято {int(kpi['Принято'])}, пропущено {int(kpi['Пропущено'])}, без кода оператора {int(kpi['Пропущено без оператора'])}.", "Контроль распределения пропущенных: расхождение 0." if diff==0 else f"Контроль распределения пропущенных: расхождение {diff}.", "Динамика построена по порядку смены: 18:00 -> 07:00, 00:00 в середине."]
+st.subheader(title)
+for x in summary: st.write("- " + x)
+c1,c2,c3,c4 = st.columns(4); c1.metric("Принято", int(kpi["Принято"])); c2.metric("Пропущено", int(kpi["Пропущено"])); c3.metric("Без оператора", int(kpi["Пропущено без оператора"])); c4.metric("% пропущенных", f"{kpi['% пропущенных']}%")
+st.markdown("### Проверка распределения пропущенных"); show(metrics["distribution"])
+st.markdown("### Динамика по порядку смены"); st.caption("Ось построена строго по порядку смены: 18:00 -> 07:00. 00:00 находится в середине."); show(metrics["dynamics"], rows=1000)
+if show_chart: st.bar_chart(metrics["dynamics"].set_index("Порядок")[["Принято","Пропущено","Пропущено без оператора"]]); st.caption("На графике X = Порядок смены, расшифровка порядка выше.")
+st.markdown("### Схема смены"); show(metrics["scheme"], rows=1000)
+st.markdown("### Кто и во сколько пропустил"); show(metrics["missed_details"], rows=1000)
+left,right = st.columns(2)
+with left: st.markdown("### Операторы"); show(metrics["operators"])
+with right: st.markdown("### Тематики"); show(metrics["skills"])
+with st.expander("Пики и аномалии"): show(metrics["peaks"]); show(metrics["anomalies"])
+st.markdown("### Экспорт")
+if st.button("Подготовить Word и Excel", use_container_width=True):
+    try:
+        st.session_state.excel = make_excel(metrics, summary, title); st.session_state.word = make_word(metrics, summary, title); st.session_state.exports_ready = True; st.success("Файлы готовы.")
+    except Exception as exc:
+        st.session_state.exports_ready = False; st.exception(exc)
+if st.session_state.exports_ready:
+    base = re.sub(r'[\\/:*?"<>|]+', "-", title)[:160]; a,b = st.columns(2)
+    with a: safe_download_button("Скачать Excel", st.session_state.excel, f"{base} avaya_report.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+    with b: safe_download_button("Скачать Word", st.session_state.word, f"{base} avaya_report.doc", "application/msword", use_container_width=True)
